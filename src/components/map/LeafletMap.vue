@@ -81,10 +81,13 @@
 
   const initMap = (): void => {
     const { config } = props.mapOptions
+    const toolsConfig = resolveMapToolsConfig(props.toolsOptions)
+    // Só desliga o zoom nativo quando o bloco tools também exibe zoom próprio
+    const useToolsZoom = !!toolsConfig && toolsConfig.zoom?.show !== false
     const mapConfig: MapConfigConfig = {
       ...DEFAULT_MAP_OPTIONS,
       ...config,
-      ...(resolveMapToolsConfig(props.toolsOptions) ? { zoomControl: false } : {})
+      ...(useToolsZoom ? { zoomControl: false } : {})
     }
 
     mapHandlerInstance = new MapHandler(mapConfig)

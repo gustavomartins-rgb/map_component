@@ -8,21 +8,26 @@
       <FontAwesomeIcon :iconName="iconButton" />
     </ElButton>
     <ElMenu
+      :key="menuOpenedsKey"
       :class="customClasses.customMenu"
+      :default-openeds="defaultOpeneds"
       mode="vertical"
+      @close="onGroupMenuClose"
+      @open="onGroupMenuOpen"
     >
       <div id="external-id-top-menu"></div>
-      <template
-        v-for="group in props.layersConfig"
-        :key="group.key"
-      >
-        <ParentMenu
-          :groupData="group"
-          :persist="!!props.options?.persist"
-          @onChildLayerToggle="onChildLayerChange"
-          @onGroupLayerToggle="onGroupLayerToggle"
-        />
-      </template>
+      <SectionMenu
+        v-if="normalizedSections.length"
+        :editingLayerKey="activeEditingLayerKey"
+        :persist="!!props.options?.persist"
+        :sections="normalizedSections"
+        :selectedSectionKey="resolvedSelectedSectionKey"
+        :visibilityMode="visibilityMode"
+        @onChildLayerToggle="onChildLayerChange"
+        @onGroupLayerToggle="onGroupLayerToggle"
+        @onLayerAction="onLayerAction"
+        @onSelectedSectionChange="onSelectedSectionChange"
+      />
       <div id="external-id-bottom-menu"></div>
     </ElMenu>
   </div>
@@ -33,9 +38,26 @@
   import L from 'leaflet'
   import { computed, nextTick, ref, watch } from 'vue'
   import FontAwesomeIcon from '../fa-icon/FontAwesomeIcon.vue'
-  import ParentMenu from './ParentMenu.vue'
-  import { GroupLayerData, LayerData, LayersConfig, LayersMenuConfig } from '../../types'
-  import { resolveLayerActiveState, shouldInitLayerOnMap } from '../../utils/menuHistory.ts'
+  import SectionMenu from './SectionMenu.vue'
+  import {
+    GroupLayerData,
+    LayerActionPayload,
+    LayerData,
+    LayersConfig,
+    LayersMenuConfig,
+    SectionEditStatePayload,
+    SectionSelectPayload
+  } from '../../types'
+  import {
+    normalizeLayersConfig,
+    shouldApplyMapOverlay
+  } from '../../utils/layersConfigNormalizer'
+  import {
+    resolveGroupCollapsedState,
+    resolveLayerActiveState,
+    setGroupCollapsedHistory,
+    shouldInitLayerOnMap
+  } from '../../utils/menuHistory.ts'
 
   type MenuProps = {
     layersConfig: LayersConfig
@@ -57,13 +79,124 @@
     (e: 'stopLoading'): void
     (e: 'onChildLayerToggle', data: LayerData): void
     (e: 'onGroupLayerToggle', data: GroupLayerData): void
+    (e: 'onLayerAction', payload: LayerActionPayload): void
+    (e: 'onSectionEditStateChange', payload: SectionEditStatePayload): void
+    (e: 'onSelectedSectionChange', payload: SectionSelectPayload): void
   }>()
 
   const props = defineProps<MenuProps>()
 
-  const isMenuOpen = ref<boolean>(false)
+  const isMenuOpen = ref<boolean>(!!props.options?.defaultOpen)
   const convertedLayers = ref<ConvertedLayers>({})
   const convertedGeoJsonLayers = ref<ConvertedGeoJsonLayers>({})
+  const internalEditingLayerKey = ref<string | null>(null)
+  const internalSelectedSectionKey = ref<string | null>(null)
+
+  const normalizedSections = computed(() => normalizeLayersConfig(props.layersConfig))
+
+  const visibilityMode = computed(() => props.options?.visibilityMode ?? 'switch')
+
+  const isEditingControlled = computed(() => props.options?.editingLayerKey !== undefined)
+
+  const activeEditingLayerKey = computed(() => {
+    if (isEditingControlled.value) {
+      return props.options?.editingLayerKey ?? null
+    }
+    return internalEditingLayerKey.value
+  })
+
+  const isSectionSelectionControlled = computed(
+    () => props.options?.selectedSectionKey !== undefined
+  )
+
+  const activeSelectedSectionKey = computed(() => {
+    if (isSectionSelectionControlled.value) {
+      return props.options?.selectedSectionKey ?? null
+    }
+    return internalSelectedSectionKey.value
+  })
+
+  /** Garante uma section válida mesmo com key ausente/inválida. */
+  const resolvedSelectedSectionKey = computed((): string | null => {
+    const sections = normalizedSections.value
+    if (!sections.length) return null
+
+    const current = activeSelectedSectionKey.value
+    if (current && sections.some((section) => section.key === current)) {
+      return current
+    }
+
+    return sections[0].key
+  })
+
+  watch(
+    normalizedSections,
+    (sections) => {
+      if (isSectionSelectionControlled.value) return
+
+      const current = internalSelectedSectionKey.value
+      if (current && sections.some((section) => section.key === current)) return
+
+      internalSelectedSectionKey.value = sections[0]?.key ?? null
+    },
+    { immediate: true }
+  )
+
+  /**
+   * Groups abertos conforme `collapsed` da config.
+   * Valor explícito tem prioridade sobre o histórico (ex.: expandir a subetapa atual).
+   * Sem `collapsed` na config, mantém o comportamento com persistência.
+   */
+  const defaultOpeneds = computed(() => {
+    const persist = !!props.options?.persist
+    const openeds: string[] = []
+
+    normalizedSections.value.forEach((section) => {
+      section.groups.forEach((group) => {
+        const collapsed =
+          group.collapsed !== undefined
+            ? group.collapsed
+            : resolveGroupCollapsedState(group.key, undefined, persist)
+        if (!collapsed) openeds.push(group.key)
+      })
+    })
+
+    return openeds
+  })
+
+  /**
+   * Remonta o ElMenu só quando muda o group da subetapa ativa.
+   * (default-openeds do Element Plus só vale na montagem; remount amplo
+   * recriava o SectionMenu e atrapalhava as actions.)
+   */
+  const menuOpenedsKey = computed(() => {
+    const stepOpenKeys: string[] = []
+    normalizedSections.value.forEach((section) => {
+      section.groups.forEach((group) => {
+        if (group.collapsed === false && group.meta?.isCurrentStep) {
+          stepOpenKeys.push(group.key)
+        }
+      })
+    })
+    return stepOpenKeys.slice().sort().join('|') || 'none'
+  })
+
+  /** Alinha o histórico de collapse com a config ao trocar a subetapa. */
+  watch(
+    () => menuOpenedsKey.value,
+    () => {
+      if (!props.options?.persist) return
+
+      const openSet = new Set(defaultOpeneds.value)
+      normalizedSections.value.forEach((section) => {
+        section.groups.forEach((group) => {
+          if (group.collapsed === undefined) return
+          setGroupCollapsedHistory(group.key, !openSet.has(group.key))
+        })
+      })
+    },
+    { flush: 'post' }
+  )
 
   type CustomClasses = {
     layerMenu: string
@@ -86,10 +219,67 @@
     return isMenuOpen.value ? 'chevron-left' : 'chevron-right'
   })
 
-  const onInitDefaultLayer = (layer: LayerData): void => {
-    if (layer.geojson) return handleGeoJsonLayer(layer)
+  const findLayerContext = (
+    layerKey: string
+  ): { sectionKey: string; layer: LayerData } | null => {
+    for (const section of normalizedSections.value) {
+      for (const group of section.groups) {
+        const layer = group.layers?.find((item) => item.key === layerKey)
+        if (layer) return { sectionKey: section.key, layer }
+      }
+    }
+    return null
+  }
+
+  const setEditingState = (sectionKey: string | null, layerKey: string | null): void => {
+    if (!isEditingControlled.value) {
+      internalEditingLayerKey.value = layerKey
+    }
+
+    const context = layerKey ? findLayerContext(layerKey) : null
+
+    emit('onSectionEditStateChange', {
+      sectionKey,
+      layerKey,
+      layer: context?.layer ?? null
+    })
+  }
+
+  const setSelectedSection = (sectionKey: string): void => {
+    if (!isSectionSelectionControlled.value) {
+      internalSelectedSectionKey.value = sectionKey
+    }
+
+    emit('onSelectedSectionChange', { sectionKey })
+  }
+
+  const onSelectedSectionChange = (sectionKey: string): void => {
+    setSelectedSection(sectionKey)
+  }
+
+  const onGroupMenuOpen = (index: string): void => {
+    if (!props.options?.persist) return
+    setGroupCollapsedHistory(index, false)
+  }
+
+  const onGroupMenuClose = (index: string): void => {
+    if (!props.options?.persist) return
+    setGroupCollapsedHistory(index, true)
+  }
+
+  const applyLayerOverlay = (layer: LayerData): void => {
+    if (!shouldApplyMapOverlay(layer)) return
+
+    if (layer.geojson || layer.mapSource === 'geojson') {
+      handleGeoJsonLayer(layer)
+      return
+    }
 
     handleWmsLayer(layer)
+  }
+
+  const onInitDefaultLayer = (layer: LayerData): void => {
+    applyLayerOverlay(layer)
   }
 
   const initializedLayerKeys = new Set<string>()
@@ -99,14 +289,17 @@
 
     const persist = !!props.options?.persist
 
-    props.layersConfig?.forEach((group) => {
-      group.layers?.forEach((layer) => {
-        if (initializedLayerKeys.has(layer.key)) return
-        if (!shouldInitLayerOnMap(layer, persist)) return
+    normalizedSections.value.forEach((section) => {
+      section.groups.forEach((group) => {
+        group.layers?.forEach((layer) => {
+          if (initializedLayerKeys.has(layer.key)) return
+          if (!shouldApplyMapOverlay(layer)) return
+          if (!shouldInitLayerOnMap(layer, persist)) return
 
-        const resolved = resolveLayerActiveState(layer, persist)
-        onInitDefaultLayer(resolved)
-        initializedLayerKeys.add(layer.key)
+          const resolved = resolveLayerActiveState(layer, persist)
+          onInitDefaultLayer(resolved)
+          initializedLayerKeys.add(layer.key)
+        })
       })
     })
   }
@@ -127,29 +320,43 @@
   )
 
   const onChildLayerChange = (layer: LayerData): void => {
-    if (layer.geojson) {
-      handleGeoJsonLayer(layer)
-    } else {
-      handleWmsLayer(layer)
-    }
-
+    applyLayerOverlay(layer)
     emit('onChildLayerToggle', layer)
   }
 
   const onGroupLayerToggle = (parent: GroupLayerData): void => {
     parent.layers.forEach((childLayer: LayerData) => {
-      if (childLayer.geojson) {
-        handleGeoJsonLayer(childLayer)
-      } else {
-        handleWmsLayer(childLayer)
-      }
+      applyLayerOverlay(childLayer)
     })
 
     emit('onGroupLayerToggle', parent)
   }
 
+  const onLayerAction = (payload: LayerActionPayload): void => {
+    const isEditAction = payload.actionType === 'edit' || payload.actionKey === 'edit'
+    const isEditControlAction =
+      payload.source === 'edit-panel' &&
+      (payload.actionType === 'cancel' ||
+        payload.actionType === 'conclude' ||
+        payload.actionKey === 'cancel' ||
+        payload.actionKey === 'conclude')
+
+    if (isEditAction && payload.source === 'child-menu' && payload.layerKey) {
+      setEditingState(payload.sectionKey ?? null, payload.layerKey)
+      if (payload.sectionKey) {
+        setSelectedSection(payload.sectionKey)
+      }
+    }
+
+    if (isEditControlAction) {
+      setEditingState(null, null)
+    }
+
+    emit('onLayerAction', payload)
+  }
+
   const convertToWmsLayer = (layer: LayerData): L.TileLayer => {
-    const wmsLayer = L.tileLayer.wms(layer.baseUrl, {
+    const wmsLayer = L.tileLayer.wms(layer.baseUrl ?? '', {
       layers: layer.layers,
       format: layer.format || 'image/png',
       transparent: layer.transparent

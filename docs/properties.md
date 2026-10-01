@@ -28,6 +28,7 @@
 | key    | string                    | Chave do grupo.                                        |
 | toggle | {active, inactive}        | Textos utilizados nos botões ativar/desativar camadas. |
 | layers | [LayerData[]](#layerdata) | Lista de camadas dentro do grupo.                      |
+| actions | [GroupActionConfig[]](#groupactionconfig) | Botões ao final da área colapsada do group. |
 
 ## LayerData
 
@@ -38,12 +39,62 @@
 | format        | string             | Formato da imagem (ex: image/png).                     |
 | transparent   | boolean            | Se a camada é transparente.                            |
 | name          | string             | Nome exibido no menu.                                  |
+| tooltip       | string             | Texto opcional ao passar o mouse sobre o nome da camada no ChildMenu. |
 | activeDefault | boolean            | Ativa por padrão.                                      |
 | active        | boolean            | Estado atual da camada.                                |
 | key           | string             | Identificador único.                                   |
 | toggle        | {active, inactive} | Textos utilizados nos botões ativar/desativar camadas. |
-| style         | {color, fillColor} | Cores utilizadas nas legendas de menu.                 |
+| visibility    | {labelShow, labelHide, show?} | Textos do tooltip/aria do ícone de olho (`visibilityMode: 'eye'`). Prioridade sobre `toggle`. Se `show: false`, oculta o controle de visibilidade. |
+| style         | {color, fillColor, icon?} | Cores da legenda. Se `icon` estiver definido, exibe o ícone Font Awesome na cor da camada. Sem ícone, exibe só o indicador de cor em círculo. |
 | options       | any                | Configurações adicionais (opcional).                   |
+| metrics       | [LayerMetricsConfig[]](#layermetricsconfig) | Lista de métricas do painel de edição. |
+| infoIcons     | [LayerInfoIconConfig[]](#layerinfoiconconfig) | Ícones informativos ao lado do nome no ChildMenu. |
+| required      | boolean            | Se `true`, exibe asterisco vermelho (`*`) ao lado do nome. |
+
+
+## LayerMetricsConfig
+
+| Nome  | Tipo             | Descrição                                              |
+|-------|------------------|--------------------------------------------------------|
+| title | string           | Título da métrica (ex.: "Área").                       |
+| type  | string           | Sufixo/unidade exibido após a label (ex.: "ha").       |
+| value | string \| number | Valor principal, exibido como label (pill) reduzida.   |
+| style | {backgroundColor, color, borderColor?} | Cores da label (pill). O texto de `value` permanece preto. |
+
+
+## LayerInfoIconConfig
+
+Ícone informativo ao lado do nome da layer no `ChildMenu` (nome alinhado a `LayerMetricsConfig` / `LayerActionConfig`).
+
+| Nome    | Tipo    | Descrição                                                                 |
+|---------|---------|---------------------------------------------------------------------------|
+| key     | string  | Identificador opcional para consulta/alteração via MapRef.                |
+| icon    | string  | Nome do ícone Font Awesome registrado no pacote.                          |
+| active  | boolean | Se `true`, o ícone é exibido.                                             |
+| tooltip | string  | Texto opcional exibido ao passar o mouse sobre o ícone.                   |
+| style   | {color?, backgroundColor?} | `color` pinta a forma. `backgroundColor` preenche o recorte interno (ex.: a exclamação preta no triângulo amarelo). |
+
+Via MapRef: `infoIcons`, `setLayerInfoIconActive(layerKey, iconRef, active)`, `setLayerInfoIcons(...)`.
+O consumidor escuta `onLayerInfoIconsUpdate` e atualiza `layers.customLayers`.
+
+
+## GroupActionConfig
+
+Botão de ação do group (mesmo formato das actions de edição + `active`).
+
+| Nome     | Tipo    | Descrição                                      |
+|----------|---------|------------------------------------------------|
+| key      | string  | Identificador da action.                       |
+| name     | string  | Rótulo do botão.                               |
+| icon     | string  | Ícone opcional.                                |
+| type     | string  | Semântica sugerida (`edit`, `custom`, etc.).   |
+| style    | object  | Cores do botão (igual ao painel de edição).    |
+| disabled | boolean | Desabilita o botão.                            |
+| visible  | boolean | Se `false`, oculta (além de `active`).         |
+| active   | boolean | Se `true`, o botão é exibido.                  |
+
+Via MapRef: `groupActions`, `setGroupActionActive(groupKey, actionKey, active)`, `setGroupActions(...)`.
+O consumidor escuta `onGroupActionsUpdate` e atualiza `layers.customLayers`.
 
 
 ## MapOptionsConfig
@@ -72,11 +123,15 @@
 
 ## LayersMenuConfig
 
-| Campo      | Tipo    | Descrição                                                                    |
-|------------|---------|------------------------------------------------------------------------------|
-| size       | string  | Tamanho do menu de camadas (small, medium, large).                           |
-| persist    | boolean | Define se o menu de camadas deve persistir o estado de exibição das camadas. |
-| removeMenu | boolean | Define se o menu de camadas deve ser removido.                               |
+| Campo               | Tipo            | Descrição                                                                    |
+|---------------------|-----------------|------------------------------------------------------------------------------|
+| size                | string          | Tamanho do menu de camadas (small, medium, large).                           |
+| persist             | boolean         | Define se o menu de camadas deve persistir o estado de exibição das camadas. |
+| removeMenu          | boolean         | Define se o menu de camadas deve ser removido.                               |
+| editingLayerKey     | string \| null  | Modo controlado do painel de edição. Se omitido, o estado é interno.         |
+| selectedSectionKey  | string \| null  | Section ativa no seletor do topo. Se a prop for passada, o consumidor controla. |
+| visibilityMode      | `'switch' \| 'eye'` | Visual do toggle de visibilidade.                                      |
+| defaultOpen         | boolean         | Se `true`, o menu lateral inicia aberto.                                     |
 
 ## DescriptiveMemorial
 
@@ -154,6 +209,7 @@ Ferramentas opcionais do mapa. Por padrão `show: false` (compatível com consum
 | fullscreen   | `{ show?: boolean; title?: string }`      | Botão de tela cheia (Fullscreen API do navegador).     |
 | center       | ver abaixo                                | Botão para centralizar/enquadrar o mapa.               |
 | measureArea  | ver abaixo                                | Ferramenta efêmera de medição de área (Geoman + Turf). |
+| showInteractionPanel | boolean                             | Painel flutuante ao medir (default `true`). Com `false`, só o tooltip do botão. |
 | texts        | `{ measureResult?: string; noGeometry?: string }` | Textos auxiliares.                         |
 
 ### center

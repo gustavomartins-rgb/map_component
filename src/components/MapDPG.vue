@@ -25,6 +25,9 @@
       :options="options.layersMenu"
       @onChildLayerToggle="emit('onChildLayerToggle', $event)"
       @onGroupLayerToggle="emit('onGroupLayerToggle', $event)"
+      @onLayerAction="emit('onLayerAction', $event)"
+      @onSectionEditStateChange="emit('onSectionEditStateChange', $event)"
+      @onSelectedSectionChange="emit('onSelectedSectionChange', $event)"
       @startLoading="isLoading = true"
       @stopLoading="isLoading = false"
     />
@@ -46,13 +49,22 @@
   import { computed, ref } from 'vue'
   import {
     DrawingEvent,
+    GroupActionConfig,
+    GroupActionsMap,
     GroupLayerData,
     IncrementedLayer,
+    LayerActionPayload,
     LayerData,
+    LayerInfoIconConfig,
+    LayerInfoIconsMap,
+    LayerMetricsConfig,
+    LayerMetricsMap,
     MapLayers,
     MapOptionsConfig,
     DescriptiveMemorial,
-    MeasureCompleteEvent
+    MeasureCompleteEvent,
+    SectionEditStatePayload,
+    SectionSelectPayload
   } from '../types'
   import Loading from './loading/Loading.vue'
   import Map from './map/LeafletMap.vue'
@@ -61,6 +73,14 @@
   import { isMemorialLayer, MEMORIAL_KEY } from '../utils/memorialLayer'
   import { calculateLayerArea } from '../utils/geometryCalculator'
   import { resolveDrawingPathOptions } from '../utils/drawingPathOptions'
+  import {
+    collectGroupActionsMap,
+    collectLayerInfoIconsMap,
+    collectLayerMetricsMap,
+    normalizeLayersConfig,
+    withGroupActionActive,
+    withLayerInfoIconActive
+  } from '../utils/layersConfigNormalizer'
   import type { MemorialDrawShape } from '../utils/drawingPathOptions'
   import type { Feature, MultiPolygon, Polygon } from 'geojson'
 
@@ -88,6 +108,12 @@
   const emit = defineEmits<{
     (e: 'onGroupLayerToggle', data: GroupLayerData): void
     (e: 'onChildLayerToggle', data: LayerData): void
+    (e: 'onLayerAction', payload: LayerActionPayload): void
+    (e: 'onSectionEditStateChange', payload: SectionEditStatePayload): void
+    (e: 'onSelectedSectionChange', payload: SectionSelectPayload): void
+    (e: 'onLayerMetricsUpdate', payload: { layerKey: string; metrics: LayerMetricsConfig[] }): void
+    (e: 'onLayerInfoIconsUpdate', payload: { layerKey: string; infoIcons: LayerInfoIconConfig[] }): void
+    (e: 'onGroupActionsUpdate', payload: { groupKey: string; actions: GroupActionConfig[] }): void
     (e: 'onDrawing', data: DrawingEvent): void
     (e: 'onCoordinateSystemChange', system: string): void
     (e: 'onFullscreenChange', active: boolean): void
@@ -111,6 +137,65 @@
   const mapContainerRef = ref<HTMLElement | null>(null)
   const coordinatePanelRef = ref()
   const isLoading = ref<boolean>(false)
+
+  const metrics = computed((): LayerMetricsMap =>
+    collectLayerMetricsMap(props.layers?.customLayers)
+  )
+
+  const infoIcons = computed((): LayerInfoIconsMap =>
+    collectLayerInfoIconsMap(props.layers?.customLayers)
+  )
+
+  const groupActions = computed((): GroupActionsMap =>
+    collectGroupActionsMap(props.layers?.customLayers)
+  )
+
+  const setLayerMetrics = (layerKey: string, nextMetrics: LayerMetricsConfig[]): void => {
+    emit('onLayerMetricsUpdate', { layerKey, metrics: nextMetrics })
+  }
+
+  const findLayerInfoIcons = (layerKey: string): LayerInfoIconConfig[] | undefined => {
+    for (const section of normalizeLayersConfig(props.layers?.customLayers)) {
+      for (const group of section.groups) {
+        const layer = group.layers?.find((item) => item.key === layerKey)
+        if (layer) return layer.infoIcons
+      }
+    }
+    return undefined
+  }
+
+  const findGroupActions = (groupKey: string): GroupActionConfig[] | undefined => {
+    for (const section of normalizeLayersConfig(props.layers?.customLayers)) {
+      const group = section.groups.find((item) => item.key === groupKey)
+      if (group) return group.actions
+    }
+    return undefined
+  }
+
+  /**
+   * Altera `active` de um infoIcon e emite para o consumidor atualizar `layers.customLayers`.
+   * `iconRef` = `key` do ícone ou índice numérico em string (`"0"`, `"1"`, ...).
+   */
+  const setLayerInfoIconActive = (layerKey: string, iconRef: string, active: boolean): void => {
+    const next = withLayerInfoIconActive(findLayerInfoIcons(layerKey), iconRef, active)
+    if (!next) return
+    emit('onLayerInfoIconsUpdate', { layerKey, infoIcons: next })
+  }
+
+  const setLayerInfoIcons = (layerKey: string, nextInfoIcons: LayerInfoIconConfig[]): void => {
+    emit('onLayerInfoIconsUpdate', { layerKey, infoIcons: nextInfoIcons })
+  }
+
+  /** Altera `active` de uma action do group e emite para o consumidor atualizar a config. */
+  const setGroupActionActive = (groupKey: string, actionKey: string, active: boolean): void => {
+    const next = withGroupActionActive(findGroupActions(groupKey), actionKey, active)
+    if (!next) return
+    emit('onGroupActionsUpdate', { groupKey, actions: next })
+  }
+
+  const setGroupActions = (groupKey: string, nextActions: GroupActionConfig[]): void => {
+    emit('onGroupActionsUpdate', { groupKey, actions: nextActions })
+  }
 
   const getMemorialPathOptions = (shape: MemorialDrawShape): L.PathOptions =>
     mapRef.value?.getDrawingPathOptions(shape) ??
@@ -276,7 +361,15 @@
     enterFullscreen,
     exitFullscreen,
     toggleFullscreen,
-    toggleMeasureArea
+    toggleMeasureArea,
+    metrics,
+    setLayerMetrics,
+    infoIcons,
+    setLayerInfoIcons,
+    setLayerInfoIconActive,
+    groupActions,
+    setGroupActions,
+    setGroupActionActive
   })
 </script>
 

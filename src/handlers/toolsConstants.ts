@@ -36,6 +36,7 @@ export const DEFAULT_MAP_TOOLS: MapToolsConfig = {
     show: true,
     title: 'Measure polygon'
   },
+  showInteractionPanel: true,
   texts: {
     measureResult: 'Measurement',
     measureLength: 'Distance',

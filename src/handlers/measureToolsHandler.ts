@@ -16,7 +16,7 @@ type MeasureToolsCallbacks = {
 type MeasureMode = 'line' | 'polygon'
 
 const LINE_ICON =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20L20 4"/><circle cx="6" cy="18" r="1.5" fill="currentColor" stroke="none"/><circle cx="18" cy="6" r="1.5" fill="currentColor" stroke="none"/></svg>'
+  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.7 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>'
 
 const POLYGON_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l8 5v10l-8 5-8-5V7z"/></svg>'
@@ -135,28 +135,34 @@ export default class MeasureToolsHandler {
           )
         }
 
-        handler._interactionPanel = L.DomUtil.create('div', 'measure-tools-interaction js-measure-interaction', container)
-        handler._interactionPanel.style.display = 'none'
-        handler._interactionPanel.innerHTML = handler.buildInteractionHtml(config)
+        if (handler.isInteractionPanelEnabled()) {
+          handler._interactionPanel = L.DomUtil.create(
+            'div',
+            'measure-tools-interaction js-measure-interaction',
+            container
+          )
+          handler._interactionPanel.style.display = 'none'
+          handler._interactionPanel.innerHTML = handler.buildInteractionHtml(config)
 
-        handler._resultsEl = handler._interactionPanel.querySelector('.js-results')
-        handler._helpEl = handler._interactionPanel.querySelector('.js-measure-help')
+          handler._resultsEl = handler._interactionPanel.querySelector('.js-results')
+          handler._helpEl = handler._interactionPanel.querySelector('.js-measure-help')
 
-        const cancelBtn = handler._interactionPanel.querySelector('.js-cancel')
-        const finishBtn = handler._interactionPanel.querySelector('.js-finish')
+          const cancelBtn = handler._interactionPanel.querySelector('.js-cancel')
+          const finishBtn = handler._interactionPanel.querySelector('.js-finish')
 
-        if (cancelBtn instanceof HTMLElement) {
-          L.DomEvent.on(cancelBtn, 'click', (e) => {
-            L.DomEvent.stop(e)
-            handler.cancel()
-          })
-        }
+          if (cancelBtn instanceof HTMLElement) {
+            L.DomEvent.on(cancelBtn, 'click', (e) => {
+              L.DomEvent.stop(e)
+              handler.cancel()
+            })
+          }
 
-        if (finishBtn instanceof HTMLElement) {
-          L.DomEvent.on(finishBtn, 'click', (e) => {
-            L.DomEvent.stop(e)
-            handler.finishDrawing()
-          })
+          if (finishBtn instanceof HTMLElement) {
+            L.DomEvent.on(finishBtn, 'click', (e) => {
+              L.DomEvent.stop(e)
+              handler.finishDrawing()
+            })
+          }
         }
 
         L.DomEvent.disableClickPropagation(container)
@@ -168,6 +174,10 @@ export default class MeasureToolsHandler {
 
     this._control = new MeasureToolsControl()
     this._control.addTo(this._map)
+  }
+
+  private isInteractionPanelEnabled(): boolean {
+    return this._config.showInteractionPanel !== false
   }
 
   private buildInteractionHtml(config: MapToolsConfig): string {
@@ -228,6 +238,7 @@ export default class MeasureToolsHandler {
     this.setMeasureActive(true)
     this.updateButtons()
     this.showInteractionPanel(mode)
+    document.addEventListener('keydown', this._boundEscapeKey)
 
     if (this._map.doubleClickZoom.enabled()) {
       this._map.doubleClickZoom.disable()
@@ -271,6 +282,7 @@ export default class MeasureToolsHandler {
     this._map.options.zoomAnimation = this._restoreZoomAnimation
     this.updateButtons()
     this.hideInteractionPanel()
+    document.removeEventListener('keydown', this._boundEscapeKey)
 
     if (!this._map.doubleClickZoom.enabled()) {
       this._map.doubleClickZoom.enable()
@@ -377,7 +389,7 @@ export default class MeasureToolsHandler {
   }
 
   private showInteractionPanel(mode: MeasureMode): void {
-    if (!this._interactionPanel || !this._helpEl) return
+    if (!this.isInteractionPanelEnabled() || !this._interactionPanel || !this._helpEl) return
 
     this._interactionPanel.style.removeProperty('display')
     this._interactionPanel.closest('.leaflet-control-measure-tools')?.classList.add('measure-tools-expanded')
@@ -395,8 +407,6 @@ export default class MeasureToolsHandler {
     if (this._resultsEl) {
       this._resultsEl.innerHTML = ''
     }
-
-    document.addEventListener('keydown', this._boundEscapeKey)
   }
 
   private hideInteractionPanel(): void {
@@ -404,7 +414,6 @@ export default class MeasureToolsHandler {
 
     this._interactionPanel.style.display = 'none'
     this._interactionPanel.closest('.leaflet-control-measure-tools')?.classList.remove('measure-tools-expanded')
-    document.removeEventListener('keydown', this._boundEscapeKey)
   }
 
   private updateButtons(): void {

@@ -198,7 +198,10 @@ export default class MapToolsHandler {
 
     this._control = new MapToolsControl()
     this._map.addControl(this._control)
-    this.removeNativeZoomControl()
+    // Remove o zoom nativo só quando o tools traz botões de zoom (evita duplicar)
+    if (config.zoom?.show !== false) {
+      this.removeNativeZoomControl()
+    }
     this.alignTopRightControls()
   }
 
